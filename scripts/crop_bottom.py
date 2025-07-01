@@ -1,3 +1,4 @@
+from utils import safe_makedir, list_images, get_mask_path, open_image, crop_image_bottom
 from PIL import Image
 import os
 
@@ -6,36 +7,33 @@ RAW_IMAGE_DIR = 'data/images'
 RAW_MASK_DIR = 'data/masks'
 CROPPED_IMAGE_DIR = 'data/cropped_images'
 CROPPED_MASK_DIR = 'data/cropped_masks'
+CROP_PX = 100
 
-# Creating output folders
-os.makedirs(CROPPED_IMAGE_DIR, exist_ok=True)
-os.makedirs(CROPPED_MASK_DIR, exist_ok=True)
+# Creating output folders 
+safe_makedir(CROPPED_IMAGE_DIR)
+safe_makedir(CROPPED_MASK_DIR)
 
-for fname in os.listdir(RAW_IMAGE_DIR):
-    # if the file is not an image it skips
-    if not (fname.endswith(".tif") or fname.endswith(".png") or fname.endswith(".jpg") or fname.endswith(".jpeg") or fname.endswith(".tiff")):
-        continue
+img_files = list_images(RAW_IMAGE_DIR)
 
+for fname in img_files:
     img_path = os.path.join(RAW_IMAGE_DIR, fname)
-    mask_path = os.path.join(RAW_MASK_DIR, os.path.splitext(fname)[0] + '_mask.png')
+    mask_path = get_mask_path(fname, RAW_MASK_DIR)
 
     # if the images doesn't have matching masks it skips
     if not os.path.exists(mask_path):
         continue
     
     # Load the image file located at the path
-    img = Image.open(img_path)
-    mask = Image.open(mask_path)
-
-    w, h = img.size
+    img = open_image(img_path)
+    mask = open_image(mask_path)
 
     # Crops the img and mask by 100 px from the bottom
-    img_cropped = img.crop((0, 0, w, h - 100))
-    mask_cropped = mask.crop((0, 0, w, h - 100 ))
+    img_cropped = crop_image_bottom((img, CROP_PX))
+    mask_cropped = crop_image_bottom((img, CROP_PX))
 
     # Saves the cropped img and mask 
     img_cropped.save(os.path.join(CROPPED_IMAGE_DIR, fname))
-    mask_cropped.save(os.path.join(CROPPED_MASK_DIR, os.path.splitext(fname)[0] + '_mask.png'))
+    mask_cropped.save(get_mask_path(fname, CROPPED_MASK_DIR))
 
 
 
