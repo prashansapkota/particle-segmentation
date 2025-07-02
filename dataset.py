@@ -31,7 +31,7 @@ class CroppedSegmentationDataset(Dataset):
         mask = (mask > 127).astype(np.float32)
 
         image = torch.from_numpy(image.transpose(2, 0, 1))  # [3, H, W]
-        mask = torch.from_numpy(mask).unsqueeze(0)           # [1, H, W]
+        mask = torch.from_numpy(mask).unsqueeze(0)          # [1, H, W]
 
         return image, mask
 
