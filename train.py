@@ -129,23 +129,3 @@ def train_model(
     torch.save(history, f"{out_dir}/history.pt")
     torch.save(model.state_dict(), f"{out_dir}/Final_Model.pth")
     print(f"Training complete! Model weights saved to {out_dir}")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    
-
-
-    
