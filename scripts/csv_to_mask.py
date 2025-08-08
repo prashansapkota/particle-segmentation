@@ -30,7 +30,7 @@ for index, row in df.iterrows():
 
         x = int(round(row[x_col]))
         y = int(round(row[y_col]))
-        cv2.circle(mask, (x,y), radius=3, color=1, thickness=-1)
+        cv2.circle(mask, (x,y), radius=1, color=1, thickness=-1)
     
     mask_path = os.path.join(RAW_MASK_DIR, os.path.splitext(image_name)[0] + '_mask.png')
     cv2.imwrite(mask_path, mask * 255)

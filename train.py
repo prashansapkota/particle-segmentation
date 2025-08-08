@@ -1,168 +1,213 @@
+# train.py
+
 import os
+import cv2
+import numpy as np
 import torch
 import torch.nn as nn
-import torch.optim as optim
-import numpy as np
-from torch.utils.data import DataLoader, random_split
-from dataset import CroppedSegmentationDataset
+from torch.utils.data import DataLoader
 from tqdm import tqdm
-import csv
-import random
+from dataset import SlidingWindowSegmentationDataset
+from utils import dice_score, set_seed, extract_sliding_patches, FocalLoss, WeightedFocalDiceLoss
+import wandb
+from scipy.ndimage import binary_dilation
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+from sklearn.model_selection import train_test_split
 
-def get_loaders(image_dir, mask_dir, batch_size=8, val_split=0.2, augment=True, dilation_iters=5, use_original_mask=False):
-    dataset = CroppedSegmentationDataset(
+def dice_score(preds, targets, threshold=0.5, eps=1e-6):
+    if preds.ndim == 4:
+        preds = preds.squeeze(1)  # shape: [B, H, W]
+    if targets.ndim == 4:
+        targets = targets.squeeze(1)
+
+    batch_size = preds.size(0)
+    scores = []
+
+    for i in range(batch_size):
+        pred = (preds[i] > threshold).float().view(-1)
+        target = targets[i].float().view(-1)
+        intersection = (pred * target).sum()
+
+        union = pred.sum() + target.sum()
+        dice = (2. * intersection + eps) / (union + eps)
+        scores.append(dice.item())
+
+    return sum(scores) / len(scores)
+
+def get_loaders(image_dir, mask_dir, batch_size, dilation_iters, use_original_mask, val_split=0.2, seed=42):
+    all_filenames = sorted([f for f in os.listdir(image_dir) if f.endswith('.tif')])
+    train_filenames, val_filenames = train_test_split(all_filenames, test_size=val_split, random_state=seed)
+
+    train_set = SlidingWindowSegmentationDataset(
         image_dir=image_dir,
         mask_dir=mask_dir,
-        augment=augment,
+        filenames=train_filenames,
+        augment=True,
         use_original_mask=use_original_mask,
-        dilation_iters=dilation_iters
+        dilation_iters=dilation_iters,
+        patch_size=256,              # Use patch_size instead of crop_size
+        stride=128,         # Use the correct CLI arg
+        seed=seed
     )
-    val_size = int(val_split * len(dataset))
-    train_size = len(dataset) - val_size
-    train_set, val_set = random_split(dataset, [train_size, val_size])
+    val_set = SlidingWindowSegmentationDataset(
+        image_dir=image_dir,
+        mask_dir=mask_dir,
+        filenames=val_filenames,
+        augment=False,
+        use_original_mask=use_original_mask,
+        dilation_iters=dilation_iters,
+        patch_size=256,              # Use patch_size instead of crop_size
+        stride=128,         # Use the correct CLI arg
+        seed=seed
+    )
+
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=4)
     val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False, num_workers=2)
     return train_loader, val_loader
 
-def dice_score(pred, target, threshold=0.7):
-    pred_bin = (pred > threshold).float()
-    intersection = (pred_bin * target).sum()
-    union = pred_bin.sum() + target.sum()
-    dice = (2 * intersection + 1e-8) / (union + 1e-8)
-    return dice.item()
+def sliding_window_inference(model, full_image, device, transform_fn, patch_size=256, stride=128):
+    height, width = full_image.shape[:2]
+    prob_map = np.zeros((height, width), np.float32)
+    cover_map = np.zeros((height, width), np.float32)
 
-def load_mask_pos_weights(csv_path):
-    mask_pos_weights = {}
-    with open(csv_path, "r") as csvfile:
-        reader = csv.DictReader(csvfile)
-        for row in reader:
-            mask_pos_weights[row["mask_name"]] = float(row["pos_weight"])
-    return mask_pos_weights
+    # Compute top and left positions similar to training logic
+    top_positions = list(range(0, height - patch_size + 1, stride))
+    if (height - patch_size) not in top_positions:
+        top_positions.append(height - patch_size)
 
-mask_pos_weights = load_mask_pos_weights("mask_pos_weights.csv")
+    left_positions = list(range(0, width - patch_size + 1, stride))
+    if (width - patch_size) not in left_positions:
+        left_positions.append(width - patch_size)
+        
+    transform = A.Compose([
+                A.Normalize(mean=(0.485, 0.456, 0.406),
+                            std=(0.229, 0.224, 0.225)),
+                ToTensorV2()
+            ])
+    for top in top_positions:
+        for left in left_positions:
+            patch = full_image[top:top + patch_size, left:left + patch_size]
+            if full_image.ndim == 2:
+                patch = np.stack([patch] * 3, axis=-1)  # Convert to 3 channels if grayscale
+            
+            tensor = transform(image=patch)['image'].unsqueeze(0).to(device)
+            with torch.no_grad():
+                logits = model(tensor)
+                probs = torch.sigmoid(logits)
+                probs_np = probs.squeeze().cpu().numpy()
 
-def set_seed(seed):
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+            prob_map[top:top + patch_size, left:left + patch_size] += probs_np
+            cover_map[top:top + patch_size, left:left + patch_size] += 1
+
+    cover_map[cover_map == 0] = 1  # avoid division by zero
+    return prob_map / cover_map
+
 
 def train_model(args, model, device):
-    import torch.nn as nn
-    import os
-    from tqdm import tqdm
-
-    # === SET SEED FOR REPRODUCIBILITY ===
-    seed = getattr(args, 'seed', 42)
-    set_seed(seed)
-
+    print(f"Training with batch size: {args.batch_size}")
+    set_seed(args.seed)
     image_dir = args.images_dir
     mask_dir = args.masks_dir
     epochs = args.epochs
     batch_size = args.batch_size
     lr = args.lr
     out_dir = args.experiment_name
+    erosion_freq = args.erosion_freq
+    erosion_iters = args.erosion_iters
     dilation_iters = args.dilation_iters
-    use_original_mask = args.use_original_mask
-    use_wandb = getattr(args, "wandb", False)
+    use_original_mask = False
+    best_val_dice = -1
+    wandb_initialized = False
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     os.makedirs(out_dir, exist_ok=True)
-    best_val_dice = -1
 
-    if use_wandb:
-        import wandb
-        wandb.init(
-            project="particle-segmentation",
-            name=args.experiment_name
-        )
-
-    # === CREATE DATA LOADERS ONCE ===
-    train_loader, val_loader = get_loaders(
-        image_dir, mask_dir, batch_size,
-        dilation_iters=dilation_iters,
-        use_original_mask=use_original_mask
-    )
-
-    # === CALCULATE POS_WEIGHT ONCE (using a few batches for stability) ===
-    # n_pos, n_pixels = 0, 0 # This block is no longer needed as pos_weights are loaded
-    # sample_batches = 0
-    # for images, masks in train_loader:
-    #     n_pos += masks.sum().item()
-    #     n_pixels += masks.numel()
-    #     sample_batches += 1
-    #     if sample_batches >= 5:  # Use up to 5 batches for a stable estimate
-    #         break
-    # n_neg = n_pixels - n_pos
-    # pos_weight = n_neg / max(n_pos, 1)
-    # print(f"Initial pos_weight: {pos_weight:.3f}")
-
-    # === CALCULATE LOSS_WEIGHT ONCE ===
-    # image_size = args.image_resize ** 2 # This block is no longer needed
-    # n_dilated = 1 + 2 * dilation_iters * (dilation_iters + 1)
-    # weight_ratio = (
-    #     (image_size * 100 / n_dilated)
-    #     / (image_size * 100 / (image_size - n_dilated))
-    # )
-    # loss_fn = nn.BCEWithLogitsLoss(
-    #     pos_weight=torch.tensor(weight_ratio).to(device)
-    # )
-    # print(f"Loss weight: {weight_ratio:.4f}")
+    train_loader, val_loader = None, None
+    prev_dilation_iters, prev_use_original_mask = None, None
 
     for epoch in range(epochs):
-        # === TRAINING ===
+        if epoch % erosion_freq == 0 and epoch > 0 and not use_original_mask:
+            dilation_iters = max(dilation_iters - erosion_iters, 0)
+            print(f"\n[Erosion] Epoch {epoch+1}: Updated dilation_iters to {dilation_iters}")
+
+        if dilation_iters == 0 and not use_original_mask:
+            use_original_mask = True
+
+        if (dilation_iters != prev_dilation_iters) or (use_original_mask != prev_use_original_mask) or (train_loader is None):
+            train_loader, val_loader = get_loaders(
+                image_dir, mask_dir, batch_size,
+                dilation_iters=dilation_iters,
+                use_original_mask=use_original_mask,
+                val_split=args.val_split,
+                seed=args.seed
+            )
+            prev_dilation_iters = dilation_iters
+            prev_use_original_mask = use_original_mask
+
+            n_pos, n_pixels = 0, 0
+            for images, masks, _ in train_loader:
+                n_pos += masks.sum().item()
+                n_pixels += masks.numel()
+            n_neg = n_pixels - n_pos
+            alpha = n_pos / (n_pos + n_neg + 1e-6)
+            print(f"Alpha: {alpha:.3f}")
+            loss_fn = BCEWithLogitsLoss(alpha=alpha, gamma=2.0, focal_weight=0.7, dice_weight=0.3).to(device)
+            loss_fn_val = BCEWithLogitsLoss(alpha=alpha, gamma=2.0, focal_weight=0.7, dice_weight=0.3).to(device)
+
         model.train()
         total_loss = 0.0
-        for images, masks, mask_names in tqdm(train_loader, desc="Train"):
-            images, masks = images.to(device), masks.to(device)
+        for images, masks, _ in tqdm(train_loader, desc="Train"):
+            images, masks = images.to(device), masks.to(device).float()
             if masks.ndim == 3:
                 masks = masks.unsqueeze(1)
             optimizer.zero_grad()
-            # Get pos_weight for each sample in the batch
-            pos_weights = torch.tensor([mask_pos_weights[name] for name in mask_names], device=device)
-            # Expand pos_weights to match mask shape
-            pos_weights = pos_weights.view(-1, 1, 1, 1).expand_as(masks)
             outputs = model(images)
-            loss = nn.functional.binary_cross_entropy_with_logits(outputs, masks, pos_weight=pos_weights)
+            loss = loss_fn(outputs, masks)
             loss.backward()
             optimizer.step()
             total_loss += loss.item() * images.size(0)
+
         avg_train_loss = total_loss / len(train_loader.dataset)
 
-        # === VALIDATION ===
         model.eval()
-        total_val_loss = 0.0
-        total_val_dice = 0.0
+        val_dice_sum = 0.0
+        val_loss_sum = 0.0
+        total_samples = 0
+
         with torch.no_grad():
-            for images, masks, mask_names in tqdm(val_loader, desc="Val"):
-                images, masks = images.to(device), masks.to(device)
+            for images, masks, _ in tqdm(val_loader, desc="Validation"):
+                images, masks = images.to(device), masks.to(device).float()
                 if masks.ndim == 3:
                     masks = masks.unsqueeze(1)
+
                 outputs = model(images)
-                # Get pos_weight for each sample in the batch
-                pos_weights = torch.tensor([mask_pos_weights[name] for name in mask_names], device=device)
-                pos_weights = pos_weights.view(-1, 1, 1, 1).expand_as(masks)
-                loss = nn.functional.binary_cross_entropy_with_logits(outputs, masks, pos_weight=pos_weights)
-                total_val_loss += loss.item() * images.size(0)
-                probs = torch.sigmoid(outputs)
-                dice = dice_score(probs, masks)
-                total_val_dice += dice * images.size(0)
-        avg_val_loss = total_val_loss / len(val_loader.dataset)
-        avg_val_dice = total_val_dice / len(val_loader.dataset)
+                val_loss = loss_fn_val(outputs, masks)
+                val_loss_sum += val_loss.item() * images.size(0)
+
+                pred_probs = torch.sigmoid(outputs)
+                pred_mask = (pred_probs > 0.5).float()
+                curr_dice = dice_score(pred_mask, masks)
+                val_dice_sum += curr_dice * images.size(0)
+                total_samples += images.size(0)
+
+        avg_val_dice = val_dice_sum / total_samples
+        avg_val_loss = val_loss_sum / total_samples
 
         print(f"Epoch {epoch+1}/{epochs} | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | Dice: {avg_val_dice:.4f}")
 
-        if use_wandb:
+        if args.wandb and not wandb_initialized:
+            wandb.init(project="particle-segmentation", name=args.experiment_name)
+            wandb_initialized = True
+
+        if args.wandb:
             wandb.log({
                 "epoch": epoch+1,
                 "train_loss": avg_train_loss,
                 "val_loss": avg_val_loss,
                 "val_dice": avg_val_dice,
                 "dilation_iters": dilation_iters,
-                # "pos_weight": pos_weight, # This line is no longer needed
+                "alpha": alpha,
             })
 
         if avg_val_dice > best_val_dice:
@@ -170,8 +215,9 @@ def train_model(args, model, device):
             torch.save(model.state_dict(), os.path.join(out_dir, "best_model.pth"))
             print("✅ Saved new best model!")
 
+        if (epoch + 1) % 150 == 0:
+            torch.save(model.state_dict(), os.path.join(out_dir, f"model_epoch_{epoch+1}.pth"))
+            print(f"📦 Saved model at epoch {epoch+1}")
+
     torch.save(model.state_dict(), os.path.join(out_dir, "Final_Model.pth"))
     print(f"Training complete! Model weights saved to {out_dir}")
-
-
-
