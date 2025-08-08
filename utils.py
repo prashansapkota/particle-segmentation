@@ -48,12 +48,12 @@ def dice_coeff_with_threshold(pred_logits, target, threshold=0.5, smooth=1e-8):
 
 
 
-def bce_dice_loss(inputs, targets, pos_weight=None, smooth=1.0):
-    """
-    BCE-With-Logits + Dice loss (single function, no class).
-    """
-    bce  = F.binary_cross_entropy_with_logits(inputs, targets, pos_weight=pos_weight)
-    probs        = torch.sigmoid(inputs)
-    intersection = (probs * targets).sum()
-    dice         = (2 * intersection + smooth) / (probs.sum() + targets.sum() + smooth)
-    return bce + (1 - dice)
+# def bce_dice_loss(inputs, targets, pos_weight=None, smooth=1.0):
+#     """
+#     BCE-With-Logits + Dice loss (single function, no class).
+#     """
+#     bce  = F.binary_cross_entropy_with_logits(inputs, targets, pos_weight=pos_weight)
+#     probs        = torch.sigmoid(inputs)
+#     intersection = (probs * targets).sum()
+#     dice         = (2 * intersection + smooth) / (probs.sum() + targets.sum() + smooth)
+#     return bce + (1 - dice)

@@ -17,7 +17,7 @@ def pretrained_Unet(device):
     model = smp.Unet(
         encoder_name='resnet101',
         encoder_weights='imagenet',
-        in_channels=3,
+        in_channels=1,
         classes=1,
         activation='sigmoid'
     )
