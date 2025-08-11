@@ -1,6 +1,5 @@
 # Automatic Nano-Particle Detector
 
-
 A deep‑learning pipeline for **particle segmentation and counting** in grayscale images using a U‑Net model with **sliding‑window** training/inference and robust post‑processing.
 
 - Trains on large images via patch extraction with Albumentations.
@@ -9,35 +8,41 @@ A deep‑learning pipeline for **particle segmentation and counting** in graysca
 
 ---
 
-## 📂 Directory Structure
+## Directory Structure
 ```
 particle-segmentation/
 │
 ├── data/
-│   ├── images/               # training images (.tif by default)
-│   └── masks/                # binary masks named `<basename>_mask.png`
+│   ├── cropped_images/               # training images (.tif by default)
+│   └── cropped_masks/                # binary masks named `<basename>_mask.png`
+│
+├── scripts/
+│   ├── crop_bottom.py               # 
+│   ├── csv_to_mask.py   
+│   └── utils.py
 │
 ├── experiment/               # training runs & checkpoints (auto‑created)
 ├── predictions/              # inference outputs (auto‑created)
 │
 ├── dataset.py                # SlidingWindowSegmentationDataset (patches + aug)
-├── model.py                  # U‑Net factory (pretrained encoder)
-├── train.py                  # training loop (Dice metric, schedulable mask dilation→erosion)
+├── model.py                  # U‑Net (pretrained encoder)
+├── train.py                  # training loop (schedulable mask dilation→erosion)
 ├── predict.py                # inference + post‑processing + measurement
 ├── utils.py                  # helpers (seed, metrics, etc.)
 ├── requirements.txt          # dependencies
+├── visual.py                 # visualize the predictions
 └── README.md                 # you’re here
 ```
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### 1) Install Dependencies
 We recommend a fresh virtual environment.
 
 ```bash
-git clone https://github.com/<your-org-or-user>/particle-segmentation.git
+git clone https://github.com/prashansapkota/particle-segmentation.git
 cd particle-segmentation
 
 # Create env (example with conda)
@@ -53,17 +58,17 @@ pip install -r requirements.txt
 ```
 
 ### 2) Prepare Your Data
-Place **grayscale** training images under `data/images/` and their **binary masks** under `data/masks/`.
+Place **grayscale** training images under `data/cropped_images/` and their **binary masks** under `data/masks/`.
 
 - Masks should follow the naming convention: `image123.tif` ↔ `image123_mask.png`  
 - If a basename already ends with `_mask`, the code accepts `<basename>.png`.
 
 ```
 data/
-  images/
+  cropped_images/
     sample_001.tif
     sample_002.tif
-  masks/
+  cropped_masks/
     sample_001_mask.png
     sample_002_mask.png
 ```
@@ -76,7 +81,7 @@ data/
 Run training with your desired experiment folder. (Use `wandb` to log if desired.)
 
 ```bash
-python main.py   --images_dir data/images   --masks_dir  data/masks   --epochs 300   --batch_size 8   --lr 1e-3   --experiment_name experiment/run_$(date +%Y%m%d_%H%M%S)   --val_split 0.2   --dilation_iters 10   --erosion_freq 50   --erosion_iters 1   --seed 42   [--wandb]
+python main.py   --images_dir data/images   --masks_dir  data/masks   --epochs 2000   --batch_size 8   --lr 1e-3   --experiment_name experiment/run_$(date +%Y%m%d_%H%M%S)   --val_split 0.2   --dilation_iters 10   --erosion_freq 150   --erosion_iters 1   --seed 42   [--wandb]
 ```
 
 During training the code can **start with dilated masks** (more forgiving) and gradually **erode** toward the original labels to increase difficulty.
@@ -93,13 +98,13 @@ During training the code can **start with dilated masks** (more forgiving) and g
 |---|---|---|
 | `--images_dir` | Directory with training images | `data/images` |
 | `--masks_dir` | Directory with binary masks | `data/masks` |
-| `--epochs` | Number of epochs | `300` |
+| `--epochs` | Number of epochs | `2000` |
 | `--batch_size` | Batch size | `8` |
 | `--lr` | Learning rate | `1e-3` |
 | `--experiment_name` | Output folder for run/checkpoints | `experiment/run_YYYYMMDD_HHMMSS` |
 | `--val_split` | Validation fraction | `0.2` |
 | `--dilation_iters` | Initial dilation on masks | `10` |
-| `--erosion_freq` | Erode every N epochs | `50` |
+| `--erosion_freq` | Erode every N epochs | `150` |
 | `--erosion_iters` | Erosion steps each time | `1` |
 | `--seed` | Random seed | `42` |
 | `--wandb` | Enable Weights & Biases logging | off |
@@ -155,10 +160,10 @@ If this project helps your work, please cite this repository and the libraries i
 
 ```
 @software{particle_segmentation_2025,
-  title        = {Particle Segmentation (Training & Inference)},
-  author       = {Your Name},
+  title        = {Automatic Nano-Particle Detector},
+  author       = {Prashan Sapkota},
   year         = {2025},
-  url          = {https://github.com/<your-org-or-user>/particle-segmentation}
+  url          = {https://github.com/prashansapkota/particle-segmentation}
 }
 ```
 
