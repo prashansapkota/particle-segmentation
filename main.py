@@ -10,6 +10,34 @@ from datetime import datetime
 
 
 def main(args):
+    """
+    Orchestrates a single training run.
+
+    Args:
+        args (argparse.Namespace):
+            Command-line configuration including:
+                - images_dir (str): Path to training images.
+                - masks_dir (str): Path to binary masks matching the images.
+                - image_resize (int): Side length for (square) resizing.
+                - val_split (float): Fraction of data used for validation.
+                - epochs (int): Number of training epochs.
+                - batch_size (int): Batch size.
+                - lr (float): Learning rate.
+                - experiment_name (str): Base output directory for runs.
+                - dilation_iters (int): Initial mask dilation iterations (curriculum).
+                - seed (int): Random seed.
+                - erosion_freq (int): How often to reduce dilation during training.
+                - erosion_iters (int): Amount of dilation reduction each erosion step.
+                - wandb (bool): Whether to log to Weights & Biases.
+                - use_original_mask (bool): If True, skip curriculum and use original masks.
+                - patch_stride (int): Stride for sliding-window patch extraction.
+
+    Returns:
+        None
+            Side effects:
+                - Creates a timestamped run directory.
+                - Trains the model and saves checkpoints/logs into the run directory.
+    """
     # Set seed at the very beginning
     set_seed(args.seed)
 

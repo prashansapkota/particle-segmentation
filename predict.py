@@ -30,6 +30,8 @@ from model import pretrained_Unet
 from train_patch import sliding_window_inference
 from scipy import ndimage as ndi
 from skimage import morphology, measure, segmentation, feature, color
+import matplotlib.pyplot as plt
+from scipy.spatial import distance
 
 
 # ----------------------------
@@ -184,6 +186,19 @@ def predict_image(
 
     # Measure
     props = measure_instances(labels, min_size=min_size, min_circularity=min_circularity)
+
+    # Compute distances between all particle centroids
+    centroids = np.array([[p["x"], p["y"]] for p in props])
+    if len(centroids) > 1:
+        dists = distance.pdist(centroids)  # condensed pairwise distances
+        plt.figure()
+        plt.hist(dists, bins=30, edgecolor="black")
+        plt.xlabel("Distance between particles (pixels)")
+        plt.ylabel("Frequency")
+        plt.title("Histogram of Inter-Particle Distances")
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_dir, f"{base}_distance_hist.png"))
+        plt.close()
 
     # Save per-particle CSV
     df = pd.DataFrame(props, columns=["label_id","x","y","area","equiv_diameter","circularity"])

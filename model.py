@@ -9,7 +9,6 @@ def pretrained_Unet(device):
 
     Args:
         device (str or torch.device): Device for model ('cuda' or 'cpu')
-        encoder (str): Encoder backbone for U-Net
 
     Returns:
         torch.nn.Module: U-Net model on correct device

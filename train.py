@@ -8,14 +8,25 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from dataset import SlidingWindowSegmentationDataset
-from utils import dice_score, set_seed, extract_sliding_patches, FocalLoss, WeightedFocalDiceLoss
+from utils import dice_score, set_seed
 import wandb
-from scipy.ndimage import binary_dilation
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 from sklearn.model_selection import train_test_split
 
 def dice_score(preds, targets, threshold=0.5, eps=1e-6):
+    """
+    Compute the Dice coefficient between predicted and target masks.
+
+    Args:
+        preds (torch.Tensor): Predicted masks of shape [B, 1, H, W] or [B, H, W].
+        targets (torch.Tensor): Ground truth masks of same shape as preds.
+        threshold (float): Probability threshold for binarization. Default is 0.5.
+        eps (float): Small value to avoid division by zero. Default is 1e-6.
+
+    Returns:
+        float: Mean Dice score across the batch.
+    """
     if preds.ndim == 4:
         preds = preds.squeeze(1)  # shape: [B, H, W]
     if targets.ndim == 4:
@@ -36,6 +47,24 @@ def dice_score(preds, targets, threshold=0.5, eps=1e-6):
     return sum(scores) / len(scores)
 
 def get_loaders(image_dir, mask_dir, batch_size, dilation_iters, use_original_mask, val_split=0.2, seed=42):
+    """
+    Create DataLoader objects for training and validation sets.
+
+    Splits available image files into train/validation sets, creates
+    SlidingWindowSegmentationDataset objects, and wraps them in DataLoaders.
+
+    Args:
+        image_dir (str): Directory containing input images.
+        mask_dir (str): Directory containing corresponding masks.
+        batch_size (int): Batch size for DataLoader.
+        dilation_iters (int): Number of binary dilation iterations to apply to masks.
+        use_original_mask (bool): If True, use masks as-is.
+        val_split (float): Fraction of images used for validation. Default is 0.2.
+        seed (int): Random seed for reproducibility. Default is 42.
+
+    Returns:
+        tuple: (train_loader, val_loader) as PyTorch DataLoader objects.
+    """
     all_filenames = sorted([f for f in os.listdir(image_dir) if f.endswith('.tif')])
     train_filenames, val_filenames = train_test_split(all_filenames, test_size=val_split, random_state=seed)
 
@@ -67,6 +96,24 @@ def get_loaders(image_dir, mask_dir, batch_size, dilation_iters, use_original_ma
     return train_loader, val_loader
 
 def sliding_window_inference(model, full_image, device, transform_fn, patch_size=256, stride=128):
+    """
+    Perform sliding window inference over a full image.
+
+    The function breaks the image into overlapping patches, runs inference
+    on each patch, and reconstructs the full probability map by averaging
+    overlapping predictions.
+
+    Args:
+        model (torch.nn.Module): Trained segmentation model.
+        full_image (np.ndarray): Input image array (H, W, 3) or (H, W).
+        device (torch.device): Computation device (CPU/GPU).
+        transform_fn (callable or None): Transformation function (not used here, normalization applied internally).
+        patch_size (int): Size of the square patch. Default is 256.
+        stride (int): Step size for the sliding window. Default is 128.
+
+    Returns:
+        np.ndarray: Probability map of shape (H, W).
+    """
     height, width = full_image.shape[:2]
     prob_map = np.zeros((height, width), np.float32)
     cover_map = np.zeros((height, width), np.float32)
@@ -105,6 +152,21 @@ def sliding_window_inference(model, full_image, device, transform_fn, patch_size
 
 
 def train_model(args, model, device):
+    """
+    Train a segmentation model using sliding window patches.
+
+    Args:
+        args (Namespace): Command-line or script arguments containing:
+            images_dir (str), masks_dir (str), epochs (int), batch_size (int),
+            lr (float), experiment_name (str), erosion_freq (int),
+            erosion_iters (int), dilation_iters (int), val_split (float),
+            seed (int), wandb (bool).
+        model (torch.nn.Module): Model to be trained.
+        device (torch.device): Computation device.
+
+    Returns:
+        None. Saves model checkpoints and logs metrics.
+    """
     print(f"Training with batch size: {args.batch_size}")
     set_seed(args.seed)
     image_dir = args.images_dir
@@ -152,8 +214,8 @@ def train_model(args, model, device):
             n_neg = n_pixels - n_pos
             alpha = n_pos / (n_pos + n_neg + 1e-6)
             print(f"Alpha: {alpha:.3f}")
-            loss_fn = BCEWithLogitsLoss(alpha=alpha, gamma=2.0, focal_weight=0.7, dice_weight=0.3).to(device)
-            loss_fn_val = BCEWithLogitsLoss(alpha=alpha, gamma=2.0, focal_weight=0.7, dice_weight=0.3).to(device)
+            loss_fn = nn.BCEWithLogitsLoss(alpha=alpha, gamma=2.0, focal_weight=0.7, dice_weight=0.3).to(device)
+            loss_fn_val = nn.BCEWithLogitsLoss(alpha=alpha, gamma=2.0, focal_weight=0.7, dice_weight=0.3).to(device)
 
         model.train()
         total_loss = 0.0
