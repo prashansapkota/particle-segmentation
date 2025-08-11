@@ -261,7 +261,7 @@ if __name__ == "__main__":
         checkpoints_dir="experiment/run_20250805_131647",
         image_dir="data/cropped_images",
         mask_dir="data/cropped_masks",
-        save_dir="evaluation_outputs_hungarian_focal_10",
+        save_dir="evaluation_outputs_hungarian",
         patch_size=256,
         stride=128,
         start_epoch=150,
