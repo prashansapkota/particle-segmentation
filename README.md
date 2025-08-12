@@ -17,9 +17,9 @@ particle-segmentation/
 │   └── cropped_masks/                # binary masks named `<basename>_mask.png`
 │
 ├── scripts/
-│   ├── crop_bottom.py               # 
-│   ├── csv_to_mask.py   
-│   └── utils.py
+│   ├── crop_bottom.py               # Crops 100px from the bottom of the image
+│   ├── csv_to_mask.py               # Converts CSV file to binary mask with radius of 1
+│   └── utils.py                     # Helpers
 │
 ├── experiment/               # training runs & checkpoints (auto‑created)
 ├── predictions/              # inference outputs (auto‑created)
@@ -160,10 +160,10 @@ If this project helps your work, please cite this repository and the libraries i
 
 ```
 @software{particle_segmentation_2025,
-  title        = {Automatic Nano-Particle Detector},
-  author       = {Prashan Sapkota},
-  year         = {2025},
-  url          = {https://github.com/prashansapkota/particle-segmentation}
+  Title        = {Automatic Nano-Particle Detector},
+  Author       = {Prashan Sapkota},
+  Year         = {2025},
+  Url          = {https://github.com/prashansapkota/particle-segmentation}
 }
 ```
 
