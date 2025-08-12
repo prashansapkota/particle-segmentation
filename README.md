@@ -77,7 +77,7 @@ data/
 
 ---
 
-## 🏋️ Training
+## Training
 Run training with your desired experiment folder. (Use `wandb` to log if desired.)
 
 ```bash
@@ -92,7 +92,7 @@ During training the code can **start with dilated masks** (more forgiving) and g
 - Dice is reported on binarized predictions.
 - Checkpoints: `best_model.pth`, periodic `model_epoch_XXXX.pth` (every N epochs), and `Final_Model.pth` saved under `--experiment_name`.
 
-### 🧩 Argument Reference (Training)
+### Argument Reference (Training)
 
 | Argument | Description | Default |
 |---|---|---|
@@ -113,7 +113,7 @@ During training the code can **start with dilated masks** (more forgiving) and g
 
 ---
 
-## 🔮 Inference (Prediction)
+## Inference (Prediction)
 Run sliding‑window inference on a single image and export masks, labels, overlays, and instance measurements.
 
 ```bash
@@ -139,14 +139,14 @@ predictions/
 
 ---
 
-## 🧠 Model & Channels
+## Model & Channels
 - U‑Net with a pretrained encoder.
 - Dataset replicates grayscale → **3‑channel** and applies ImageNet normalization.
 - Ensure `model.py` `in_channels` matches your dataset output (set to **3** to use ImageNet weights end‑to‑end).
 
 ---
 
-## 🧪 Tips & Troubleshooting
+## Tips & Troubleshooting
 - **Mask naming**: `*_mask.png` must match image basenames.
 - **Missing checkpoints**: Verify `--run_dir`; the script searches for `model_epoch_*.pth` first.
 - **OOM on large images**: Reduce `--patch_size` or increase `--stride`.
@@ -155,7 +155,7 @@ predictions/
 
 ---
 
-## 📜 Citation
+## Citation
 If this project helps your work, please cite this repository and the libraries it builds on (PyTorch, Albumentations, scikit‑image).
 
 ```
@@ -169,5 +169,5 @@ If this project helps your work, please cite this repository and the libraries i
 
 ---
 
-## 📄 License
+## License
 Specify your license (e.g., MIT) in `LICENSE`.
